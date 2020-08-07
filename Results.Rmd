@@ -1,0 +1,345 @@
+---
+title: "HRM Results"
+date: "17/11/2019"
+output: pdf_document
+header-includes:
+    - \usepackage{dcolumn}
+    - \usepackage{rotating}
+---
+## Code ##
+### Loading Packages ###
+The following R packages were used in the analysis: 
+``` {r preparation, eval = F, echo = F}
+library('tidyverse')
+library('data.table')
+library('lubridate')
+library('janitor')
+library('moderndive')
+library('stargazer')
+library('plm')
+library('lfe')
+library('lmtest')
+library('rmarkdown')
+```
+
+### Reading and Cleaning Data ###
+The data was gathered from 4 different databases, namely:
+
+1. Execucomp
+2. Compustat/CRSP
+3. BoardEx
+4. ISS
+
+All data was retrieved from the Wharton WRDS database. The final dataset includes data from over `r nrow(count(reg_dt, cusip))` companies spanning over 13 years (2005-2018). Two primary indentifiers used to join datasets included CUSIP and CIK codes--this is reccommended by WRDS since these codes do not change and overlap overtime. 
+
+Cleaning procedures mainly included standardising column names, removing missing data and removing duplicate observations. 
+``` {r reading and cleaning, eval = F, echo = F}
+
+board_ex <- read_csv("C:/Users/Anas Khan/OneDrive - The University of Melbourne/Desktop
+/Honours Materials/Research Methods/Corporate Governance_FloraKuang/Data
+/BoardEx. 05-19/a23d9cb34c224f97.csv") %>%
+filter(!is.na(CIKCode), RowType == "Board Member") %>% mutate(fyear = year(as.Date
+(as.character(AnnualReportDate), format = '%Y%m%d')), CIKCode = as.numeric(CIKCode))
+
+classified_board <- read_csv("C:/Users/Anas Khan/OneDrive - The University of Melbourne/
+Desktop/Honours Materials/Research Methods/Corporate Governance_FloraKuang/Data/
+BoardEx. 05-19/129aad06f095e612.csv") %>%
+mutate(fyear = year, staggered = as.factor(case_when(CBOARD == 'YES' ~ 1, TRUE ~ 0 )))
+%>%select(cusip, fyear, staggered) %>%
+filter(!is.na(cusip))
+
+## Create Total Annual Board Compensation Variable ##
+tcomp <- board_ex %>%
+group_by(fyear, CIKCode) %>%
+  count(wt = TotalCompensation) %>%
+  ungroup() %>%
+  mutate(CIKCode = as.numeric(CIKCode))
+
+## Update Board_ex data ##
+board_ex <- board_ex %>%
+  inner_join(tcomp, by = c('fyear', 'CIKCode'))
+
+
+comp_crsp <- read_csv("C:/Users/Anas Khan/OneDrive - The University of Melbourne/
+Desktop/Honours Materials/Research Methods/Corporate Governance_FloraKuang/Data/
+Compustat_CRSP. 05-19/a9efcf6b1dc5468e.csv") %>%
+  mutate(cik = as.numeric(cik)) %>% filter(!is.na(cusip)) %>%
+  inner_join(classified_board, by = c('fyear', 'cusip')) %>%
+  mutate(cusip = substr(cusip, 1, 8))
+
+execucomp <- read_csv("C:/Users/Anas Khan/OneDrive - The University of Melbourne/
+Desktop/Honours Materials/Research Methods/Corporate Governance_FloraKuang/Data/
+Execucomp. 05-19/15de9ba1aa936b62.csv") 
+execucomp_director <- read_csv("C:/Users/Anas Khan/OneDrive - The University of Melbourne
+/Desktop/Honours Materials/Research Methods/Corporate Governance_FloraKuang/Data/
+Execucomp. 05-19/11891d6dd99d2d3a.csv") %>%
+  group_by(YEAR, CUSIP) %>% mutate(annual_comp_total_sec = sum(TOTAL_SEC), 
+  annual_comp_total_cash = sum(CASH_FEES), 
+  annual_comp_total_rep = sum(CASH_FEES,OPTION_AWARDS,NONEQ_INCENT, OTHCOMP)) %>% 
+  ungroup() %>%
+  select(YEAR, CUSIP, annual_comp_total_sec, annual_comp_total_cash, annual_comp_total_rep) 
+%>% unique()
+
+execucomp <- inner_join(execucomp, execucomp_director, by = c('YEAR','CUSIP')) %>%
+  clean_names("snake") %>%
+  filter(!is.na(becameceo), pceo == "CEO", !is.na(cusip)) %>%
+  mutate(becameceo = as.Date(as.character(becameceo), format = "%Y%m%d"), 
+         leftofc = as.Date(as.character(leftofc), format = "%Y%m%d"))
+```
+
+### CEO Compensation Regression ###
+The study design comprised of two-staged regression, where the residuals from the ceo compensation regression were to be used as oberservations of the 'Excess CEO Compensation' variable in the following regression. The following regression equation was tested:
+
+*add formula*
+
+``` {r excess ceo reg, eval = F, echo = F}
+ ceo_reg_dt <- inner_join(comp_crsp, execucomp, by = c("cusip", "fyear" = "year")) 
+  
+  ceo_reg_dt <- ceo_reg_dt %>%
+  filter(!is.na(cusip) | !is.na(execid))%>%
+    mutate(duality = as.character(str_detect(ceo_reg_dt$title, "Chair|chair")),
+           fyear = year(as.Date(as.character(fyear), format = "%Y")),
+           sic = as.factor(sic))
+  ceo_reg_dt <- ceo_reg_dt %>% group_by(cusip) %>%
+    mutate(prcc_ff = dplyr::lag(prcc_f), annual_ret = (prcc_f - prcc_ff)/prcc_ff, 
+           sd_annual_ret = sd(annual_ret, na.rm = T)) %>%
+    ungroup() %>%
+    mutate(duality = case_when(
+      duality == "TRUE" ~ "1",
+      TRUE ~ "0"
+    ), market_cap = prcc_f*csho , book_value = bkvlps*csho, tbq = market_cap/book_value,
+    roa = ni/at, ocfta = oancf/at, debtr = lt/at)  
+  
+  ceo_reg_dt1 <- ceo_reg_dt %>%
+    filter(!is.na(total_sec) | !is.na(tdc1)) %>%
+    select(cusip, cik, fyear, execid, total_sec, tdc1, market_cap, tbq, annual_ret, roa, 
+           sd_annual_ret, sic, sicdesc, gender, age, duality, ocfta, debtr, staggered,
+    annual_comp_total_cash, annual_comp_total_sec, annual_comp_total_rep)
+  
+    ceo_model_1 <- felmlm(total_sec ~ market_cap + tbq + annual_ret + roa + sd_annual_ret 
+                      + as.factor(gender)+ age, data = ceo_reg_dt1| as.factor(sic), 
+                      na.action = na.exclude) 
+    ceo_model_2 <- felmlm(tdc1 ~ market_cap + tbq + annual_ret + roa + sd_annual_ret 
+                      + as.factor(gender)+ age | as.factor(sic), data = ceo_reg_dt1, 
+                      na.action = na.exclude)
+    
+    excess_ceo_comp1 <- as.vector(t(data.frame(resid(ceo_model_1))))
+    excess_ceo_comp2 <- as.vector(t(data.frame(resid(ceo_model_2))))
+    
+    ceo_reg_dt11 <- ceo_reg_dt1 %>% mutate(excess_ceo_comp = excess_ceo_comp1) 
+    ceo_reg_dt12 <- ceo_reg_dt1 %>% mutate(excess_ceo_comp = excess_ceo_comp2)
+```
+
+Two separate measures of ceo compensation (obtained from execucomp) were used to check which one produced more reliable results. The first variable is the total ceo compensation that the company reports to the SEC, the second is
+the total ceo compensation including equity payouts, options and longterm incentives. The results were as follows:
+
+``` {r ceo reg table, results = 'asis', echo = F}
+
+stargazer(ceo_model_1, ceo_model_2, title = "CEO Compensation Regression", omit = 'sic',
+          dep.var.labels = c("Total SEC", "Total inc. Option Grants"), 
+          covariate.labels = c("Market Cap", "Tobin's Q", "Annual Stock Return", 
+                               "Return on Assets", "Firm Risk", "Gender", "Age"), header = FALSE, align = T, 
+          add.lines = list(c("Fixed Effects", "Yes", "Yes")))
+
+```
+\newpage
+### Creating Majority Group Variable ###
+Creating the majority group variable was the most challenging part of the execution process. The concept was such that for each firm year, the distinct number of directors would be compared to those in the following year, this would give a subset of the directors present on the board in the first year. This process would then be repeated for all following years. If the proportion of directors 'carried on' from 2 years was > 0.5, the following firm year would then be coded as having a majority group on the board, capable of influencing compensation.
+ 
+``` {r majority group variable, eval = F, echo = F}
+
+  ## Create Group Variable ##
+    
+    board_ex_fil <- board_ex %>%
+      mutate(AnnualReportDate =  as.Date(as.character(AnnualReportDate), format = "%Y%m%d"), 
+             fyear = as.character(year(AnnualReportDate)), fmonth = month(AnnualReportDate), 
+             cik = as.numeric(CIKCode), NED = case_when( NED == "No" ~ 0, NED == "Yes" ~ 1)) 
+%>% semi_join(ceo_reg_dt, by = "cik") %>%
+      clean_names("snake") %>%
+      distinct(director_id, annual_report_date, cik, .keep_all = TRUE) %>%
+      select(director_id, annual_report_date, fyear, cik, number_directors)
+    
+    nested_board_ex_fil <- board_ex_fil %>%
+      group_by(cik,fyear) %>%
+      nest() %>%
+      arrange(fyear) %>%
+      group_by(cik) %>%
+      nest() %>%
+      ungroup()
+    
+  ## Checking for data accuracy ##
+    
+      tf <- c(data = NA)
+      count = 0
+      for (i in 1:nrow(nested_board_ex_fil)) {
+        for (k in 1:nrow(nested_board_ex_fil[[2]][[i]])) {
+          if (c(nrow(nested_board_ex_fil[[2]][[i]][[2]][[k]]) != 
+            distinct(nested_board_ex_fil[[2]][[i]][[2]][[k]]['number_directors']))){
+            
+            count = count + 1
+            tf[count] <- c(nested_board_ex_fil[i,1])
+          }
+          
+        }
+      }
+      
+       inaccurate_co <- as.character(map_dbl(tf, ~.x)) %>%
+         data.frame() %>%
+         distinct()
+
+## New data generation with Group variable ##
+       
+       majority_data = NA
+       f = 0
+       for (i in 1:nrow(nested_board_ex_fil)) {
+         f = f + 1
+         w = nrow(nested_board_ex_fil[[2]][[i]]) - 1
+         prop_i = matrix(data = NA, nrow = w , 
+                         ncol = w)
+         if (nrow(nested_board_ex_fil[[2]][[i]]) > 1) {
+           
+           for (j in 1:(nrow(nested_board_ex_fil[[2]][[i]]) - 1) ) {
+             
+             if (j < (nrow(nested_board_ex_fil[[2]][[i]]) - 1)) {
+               
+               for (k in 1:(nrow(nested_board_ex_fil[[2]][[i]]) - j) ) {
+                 
+                 if (k == 1) {
+                   
+                   b = j + 1
+                   directors_y0 = nested_board_ex_fil[[2]][[i]][[2]][[j]]['director_id']
+                   directors_y1 = nested_board_ex_fil[[2]][[i]][[2]][[b]]['director_id']
+                   common_directors = semi_join(directors_y0, 
+                                                directors_y1, 
+                                                by = 'director_id')
+                   prop_i[j,j] = nrow(semi_join(common_directors, directors_y1, by = 
+                                                  'director_id')) / nrow(directors_y1)
+                   
+                   c = b
+                   q = j
+                   
+                 } else if (k > 1 & k < (nrow(nested_board_ex_fil[[2]][[i]]) - j))  {
+                   c = c + 1
+                   q = q + 1
+                   directors_y1 = nested_board_ex_fil[[2]][[i]][[2]][[c]]['director_id']
+                   common_directors = semi_join(common_directors, 
+                                                directors_y1, 
+                                                by = 'director_id')
+                   prop_i[q,j] = nrow(semi_join(common_directors, directors_y1, by = 
+                                                  'director_id')) / nrow(directors_y1)
+                   
+                   
+                 } else {
+                   c = c + 1
+                   q = q + 1
+                   directors_y1 = nested_board_ex_fil[[2]][[i]][[2]][[c]]['director_id']
+                   common_directors = semi_join(common_directors, 
+                                                directors_y1, 
+                                                by = 'director_id')
+                   prop_i[q,j] = nrow(semi_join(common_directors, directors_y1, by = 
+                                                  'director_id')) / nrow(directors_y1)
+                   ## Mutate here ##
+                   
+                 }
+                 ## Last j iteration ## 
+                 
+               } }  else {
+                 
+                 b = j + 1
+                 directors_y0 = nested_board_ex_fil[[2]][[i]][[2]][[j]]['director_id']
+                 directors_y1 = nested_board_ex_fil[[2]][[i]][[2]][[b]]['director_id']
+                 common_directors = semi_join(directors_y0, 
+                                              directors_y1, 
+                                              by = 'director_id')
+                 prop_i[j,j] = nrow(semi_join(common_directors, directors_y1, by = 
+                                                'director_id')) / nrow(directors_y1)
+                 
+                 vec <- matrix(data = NA, nrow = (nrow(prop_i) + 1), ncol = 1)
+                 
+                 no_years  = 2
+                 
+                 if (nrow(prop_i) >= no_years) {
+                   d = no_years - 1
+                   for (p in 1: (nrow(prop_i) - (no_years - 2))) {
+                     tt <- t(prop_i)
+                     max <- max(tt[1:p, d])
+                     if (max > 0.5) {
+                       vec[(d + 1),1] <- 1
+                     } else {
+                       vec[(d + 1),1] <- 0
+                     }
+                     d = d + 1
+                     }
+                     }
+                     }
+                 
+               }
+             
+           
+           cc <- nested_board_ex_fil[[2]][[f]] %>% mutate(majority = vec, 
+                 CIKCode = nested_board_ex_fil[f,1]$cik) %>% unnest()
+           majority_data <- rbind(majority_data, cc)
+         }}
+         
+       
+       majority_data <- majority_data %>%
+         filter(!is.na(majority)) %>%
+         mutate(fyear = as.numeric(fyear))
+```
+
+A new dataset was generated which included the new variable. Examination of the variable reveals the following statistics:
+
+``` {r majority stats, results ='asis', echo = F}
+
+knitr::kable(count(majority_data, majority))
+
+```
+
+This shows that the presence of directors on the board is extremely sticky, and that 231087 of `r nrow(majority_data)` firm years involves a majority group of directors that have been working together for at least 2 years. These statistics indicate that similar pepople are incharge of governing a company year after year, and, therefore, the 'social' aspect of corporate governance is an important one. 
+
+### Final Regressions ###
+
+After genearting and compiling all variables of interest, the final regression results were as follows:
+
+``` {r final reg, eval = F, echo = F}
+     
+    reg_model_boardex <- felm(TotalCompensation ~ excess_ceo_comp + staggered + 
+roa_1 + ocfta_1 + sd_annual_ret_1 + debtr_1 + number_directors + majority + duality | sic, 
+                         data = reg_dt)
+    reg_model_execucomp_sec <- felm(annual_comp_total_sec ~ excess_ceo_comp + staggered 
++ roa_1 + ocfta_1 + sd_annual_ret_1 + debtr_1 + number_directors + majority + duality | sic, 
+                             data = reg_dt)
+    reg_model_execucomp_cash <- felm(annual_comp_total_cash ~excess_ceo_comp + staggered 
++ roa_1 + ocfta_1 + sd_annual_ret_1 + debtr_1 + number_directors + majority + duality | sic, 
+                              data = reg_dt)
+    reg_model_execucomp_rep <- felm(annual_comp_total_rep ~excess_ceo_comp + staggered 
++ roa_1 + ocfta_1 + sd_annual_ret_1 + debtr_1 + number_directors + majority + duality | sic, 
+                           data = reg_dt)
+
+```
+
+Four different dependent variables were used:
+
+1. Total Board Compensaiton for a fiscal year as per BoardEx
+2. Total Board Compensaiton reported to the SEC
+3. Total Board Cash Compensation 
+4. Total Board Compensation including options
+
+
+The final regression results are as follows:
+
+``` {r final regression table, results = 'asis', out.extra = 'angle =90', echo = F}
+stargazer(reg_model_execucomp_tdc, dep.var.labels = c("Total Board Comp."), covariate.labels = c("Excess CEO Comp",
+          "Staggered", "ROA", "Liquidity", "Firm Risk", "Leverage", "Number of directors",
+          "Majority", "Duality", "Majority*Excess CEO Comp", "Majority*Staggered", "Majority*Duality"), header = FALSE, add.lines = list(c("Fixed effects", "Yes")))
+```
+\newpage
+Descriptive Stats: 
+
+``` {r descriptive statistics, results = 'asis', fig.align = 'center', echo = F}
+
+stargazer(drt, title = 'Descriptive Statistics', header = FALSE)
+
+```
+
+

@@ -9,10 +9,12 @@ library('lfe')
 library('lmtest')
 library('rmarkdown')
 
-board_ex <- read_csv("C:/Users/Anas Khan/OneDrive - The University of Melbourne/Desktop/Honours Materials/Research Methods/Corporate Governance_FloraKuang/Data/BoardEx. 05-19/a23d9cb34c224f97.csv") %>%
+board_ex <- read_csv("C:/Users/Anas Khan/OneDrive - The University of Melbourne/
+                     Desktop/Honours Materials/Research Methods/Corporate Governance_FloraKuang/Data/BoardEx. 05-19/a23d9cb34c224f97.csv") %>%
 filter(!is.na(CIKCode), RowType == "Board Member") %>% mutate(fyear = year(as.Date(as.character(AnnualReportDate), format = '%Y%m%d')), CIKCode = as.numeric(CIKCode))
 
-classified_board <- read_csv("C:/Users/Anas Khan/OneDrive - The University of Melbourne/Desktop/Honours Materials/Research Methods/Corporate Governance_FloraKuang/Data/BoardEx. 05-19/129aad06f095e612.csv") %>%
+classified_board <- read_csv("C:/Users/Anas Khan/OneDrive - The University of Melbourne
+                             /Desktop/Honours Materials/Research Methods/Corporate Governance_FloraKuang/Data/BoardEx. 05-19/129aad06f095e612.csv") %>%
 mutate(fyear = year, staggered = as.factor(case_when(CBOARD == 'YES' ~ 1, TRUE ~ 0 ))) %>%
   select(cusip, fyear, staggered) %>%
   filter(!is.na(cusip))
@@ -29,13 +31,16 @@ board_ex <- board_ex %>%
   inner_join(tcomp, by = c('fyear', 'CIKCode'))
 
 
-comp_crsp <- read_csv("C:/Users/Anas Khan/OneDrive - The University of Melbourne/Desktop/Honours Materials/Research Methods/Corporate Governance_FloraKuang/Data/Compustat_CRSP. 05-19/a9efcf6b1dc5468e.csv") %>%
+comp_crsp <- read_csv("C:/Users/Anas Khan/OneDrive - The University of Melbourne/
+                      Desktop/Honours Materials/Research Methods/Corporate Governance_FloraKuang/Data/Compustat_CRSP. 05-19/a9efcf6b1dc5468e.csv") %>%
   mutate(cik = as.numeric(cik)) %>% filter(!is.na(cusip)) %>%
   inner_join(classified_board, by = c('fyear', 'cusip')) %>%
   mutate(cusip = substr(cusip, 1, 8))
 
-execucomp <- read_csv("C:/Users/Anas Khan/OneDrive - The University of Melbourne/Desktop/Honours Materials/Research Methods/Corporate Governance_FloraKuang/Data/Execucomp. 05-19/15de9ba1aa936b62.csv") 
-execucomp_director <- read_csv("C:/Users/Anas Khan/OneDrive - The University of Melbourne/Desktop/Honours Materials/Research Methods/Corporate Governance_FloraKuang/Data/Execucomp. 05-19/11891d6dd99d2d3a.csv") %>%
+execucomp <- read_csv("C:/Users/Anas Khan/OneDrive - The University of Melbourne
+                      /Desktop/Honours Materials/Research Methods/Corporate Governance_FloraKuang/Data/Execucomp. 05-19/15de9ba1aa936b62.csv") 
+execucomp_director <- read_csv("C:/Users/Anas Khan/OneDrive - The University of Melbourne/Desktop/
+                               Honours Materials/Research Methods/Corporate Governance_FloraKuang/Data/Execucomp. 05-19/11891d6dd99d2d3a.csv") %>%
   group_by(YEAR, CUSIP) %>% mutate(annual_comp_total_sec = sum(TOTAL_SEC), 
                                    annual_comp_total_cash = sum(CASH_FEES), 
                                    annual_comp_total_rep = sum(CASH_FEES,OPTION_AWARDS,NONEQ_INCENT, OTHCOMP)) %>% ungroup() %>%
@@ -230,18 +235,22 @@ execucomp <- inner_join(execucomp, execucomp_director, by = c('YEAR','CUSIP')) %
        reg_dt <- inner_join(reg_dt, bb, by = c('fyear', 'cik' = 'CIKCode')) %>% mutate(duality = as.factor(duality),
                                                                                        majority = as.factor(majority)) %>%
         group_by(fyear) %>% mutate(avg_compensation_annual = mean(TotalCompensation, na.rm = T),
-                                   avg_compensation_annual_sec = mean(annual_comp_total_sec, na.rm = T), avg_compensation_annual_cash = mean(annual_comp_total_cash, na.rm = T),
-                                   avg_compensation_annual_rep = mean(annual_comp_total_rep, na.rm = T)) %>% ungroup() %>% distinct(fyear, cusip, .keep_all = T) %>% ungroup() %>% 
-         arrange(cusip, fyear) %>% group_by(cusip) %>% mutate(roa_1 = dplyr::lag(roa), ocfta_1 = dplyr::lag(ocfta), sd_annual_ret_1 = dplyr::lag(sd_annual_ret),
-                                                              debtr_1 = dplyr::lag(debtr), excess_ceo_comp_1 = dplyr::lag(excess_ceo_comp), avg_compensation_co_sec = mean(annual_comp_total_sec),
+                                   avg_compensation_annual_sec = mean(annual_comp_total_sec, na.rm = T), 
+                                   avg_compensation_annual_cash = mean(annual_comp_total_cash, na.rm = T),
+                                   avg_compensation_annual_rep = mean(annual_comp_total_rep, na.rm = T)) %>% 
+         ungroup() %>% distinct(fyear, cusip, .keep_all = T) %>% ungroup() %>% 
+         arrange(cusip, fyear) %>% group_by(cusip) %>% mutate(roa_1 = dplyr::lag(roa), ocfta_1 = dplyr::lag(ocfta),
+                                                              sd_annual_ret_1 = dplyr::lag(sd_annual_ret),
+                                                              debtr_1 = dplyr::lag(debtr), excess_ceo_comp_1 = dplyr::lag(excess_ceo_comp),
+                                                              avg_compensation_co_sec = mean(annual_comp_total_sec),
                                                               majority_1 = dplyr::lag(majority, 1)) %>% ungroup()
        
     ## Final Regression Models ##
        
-    reg_model_boardex <- felm(TotalCompensation ~ excess_ceo_comp + staggered + roa_1 + ocfta_1 + sd_annual_ret_1 + debtr_1 + number_directors + majority + duality | sic, 
-                         data = reg_dt)
-    reg_model_execucomp_sec <- felm(annual_comp_total_sec ~ excess_ceo_comp + staggered + roa_1 + ocfta_1 + sd_annual_ret_1 + debtr_1 + number_directors + majority + duality | sic, 
-                             data = reg_dt)
+    reg_model_boardex <- felm(TotalCompensation ~ excess_ceo_comp + staggered + roa_1 + ocfta_1 + 
+                                sd_annual_ret_1 + debtr_1 + number_directors + majority + duality | sic, data = reg_dt)
+    reg_model_execucomp_sec <- felm(annual_comp_total_sec ~ excess_ceo_comp + staggered + roa_1 + ocfta_1 + sd_annual_ret_1 + 
+                                      debtr_1 + number_directors + majority + duality | sic, data = reg_dt)
     reg_model_execucomp_cash <- felm(annual_comp_total_cash ~excess_ceo_comp + staggered + roa_1 + ocfta_1 + sd_annual_ret_1 + debtr_1 + number_directors + majority + duality | sic, 
                               data = reg_dt)
     reg_model_execucomp_rep <- felm(annual_comp_total_rep ~excess_ceo_comp + staggered + roa_1 + ocfta_1 + sd_annual_ret_1 + debtr_1 + number_directors + majority + duality | sic, 
@@ -265,17 +274,3 @@ summary(reg_model_execucomp_tdc)
     
     ggplot(reg_dt) + geom_line(aes(x = fyear, y = avg_compensation_co_sec, color = majority), outlier.size =NA) + facet_wrap(~majority) + 
       coord_cartesian(ylim = quantile(reg_dt$avg_compensation_co_sec, c(0.1, 0.9)))
-    
-    
-       summary(reg_model_execucomp_tdc)
-       
-  drt <- reg_dt %>% select(total_sec, age, gender, tdc1, staggered, roa, ocfta, sd_annual_ret, debtr, number_directors,
-                           majority, duality) %>% mutate(majority = (as.numeric(majority) - 1), duality = (as.numeric(duality) - 1), staggered = (as.numeric(staggered) - 1), gender = case_when(
-    gender == "MALE" ~ 1, 
-    TRUE ~ 0)) %>% as.data.frame()
-  names(drt) = c("CEO Compensation", "Age",
-                               "Gender", "Board Compensation",
-                               "Staggered", "ROA", "OCFTA (Liquidity)",
-                               "Sd_AnnualRet (Firm Risk)", "Debt Ratio (Leverage)",
-                               "Board Size", "Majority",
-                               "Duality") 
